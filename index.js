@@ -1,12 +1,13 @@
 import puppeteer from "puppeteer";
 import fs from "fs";
+import clipboard from 'clipboardy';
 import { PNG } from "pngjs";
 
 // Función para encontrar coordenadas de una imagen dentro de la pantalla
 async function findImageCoordinates(page, targetImagePath) {
-  await page.screenshot({ path: "img/fullpage.png", fullPage: true });
+  await page.screenshot({ path: "fullpage.png", fullPage: true });
 
-  const fullImage = PNG.sync.read(fs.readFileSync("img/fullpage.png"));
+  const fullImage = PNG.sync.read(fs.readFileSync("fullpage.png"));
   const target = PNG.sync.read(fs.readFileSync(targetImagePath));
 
   const { width: fw, height: fh } = fullImage;
@@ -46,11 +47,6 @@ const credenciales = [
   { usuario: "admin@claro", password: "Gpon2016CLARO!" }
 ];
 
-const credencil680 = [
-  { usuario: "admin", password: "Gpon2016CLARO!" },
-  { usuario: "admin@claro", password: "Gpon2016CLARO!" }
-];
-
 async function openWebPage() {
   const browser = await puppeteer.launch({
     headless: false,
@@ -60,6 +56,8 @@ async function openWebPage() {
       '--disable-setuid-sandbox',
       '--ignore-certificate-errors',
       '--allow-insecure-localhost',
+      '--ssl-version-min=tls1',
+      '--disable-features=BlockInsecurePrivateNetworkRequests',
     ],
   });
 
@@ -143,7 +141,7 @@ async function openWebPage() {
     await new Promise(resolve => setTimeout(resolve, 2000));
 
     // 🔍 Buscar botón 'Security' por imagen
-    const coords = await findImageCoordinates(page, 'img/security_button.png');
+    const coords = await findImageCoordinates(page, 'security_button.png');
     if (coords) {
       console.log(`📍 Coordenadas detectadas: x=${coords.x}, y=${coords.y}`);
       await page.mouse.click(coords.x, coords.y);
@@ -168,15 +166,14 @@ async function openWebPage() {
     } catch (err) {
       console.log("⚠️ No se pudo acceder al checkbox directamente, intentando con imagen...");
 
-      const coords = await findImageCoordinates(page, 'img/envio.png');
+      const coords = await findImageCoordinates(page, 'envio.png');
 
       if (coords) {
         console.log("☑️ El checkbox ya está activado (envio.png encontrado), no se hace clic.");
-        // No se hace clic ni se avanza a enviar.png
       } else {
         console.log("🔁 No se encontró envio.png, buscando sinenvio.png...");
 
-        const fallbackCoords = await findImageCoordinates(page, 'img/sinenvio.png');
+        const fallbackCoords = await findImageCoordinates(page, 'sinenvio.png');
         if (fallbackCoords) {
           console.log(`📍 Coordenadas detectadas: x=${fallbackCoords.x}, y=${fallbackCoords.y}`);
           await page.mouse.click(fallbackCoords.x, fallbackCoords.y);
@@ -191,7 +188,7 @@ async function openWebPage() {
     // Solo si se hizo clic en sinenvio.png, hacer clic en enviar
     if (hizoClickEnSinEnvio) {
       await new Promise(resolve => setTimeout(resolve, 3000));
-      const enviar = await findImageCoordinates(page, 'img/enviar.png');
+      const enviar = await findImageCoordinates(page, 'enviar.png');
       if (enviar) {
         console.log(`📍 Coordenadas detectadas: x=${enviar.x}, y=${enviar.y}`);
         await page.mouse.click(enviar.x, enviar.y);
@@ -202,80 +199,85 @@ async function openWebPage() {
       await new Promise(resolve => setTimeout(resolve, 10000));
     }
 
-
-    const enviado = await findImageCoordinates(page, 'img/administracion.png');
+    const enviado = await findImageCoordinates(page, 'administracion.png');
     if (enviado) {
       console.log(`📍 Coordenadas detectadas: x=${enviado.x}, y=${enviado.y}`);
       await page.mouse.click(enviado.x, enviado.y);
-      console.log("📤 Hizo clic en 'botón enviar'");
+      console.log("📤 Hizo clic en 'administracion'");
     } else {
       console.log("❌ No se encontró la imagen del botón 'administracion'.");
     }
 
-    await new Promise(resolve => setTimeout(resolve, 5000));
-
-    // Actualizar campo ACS URL
-    const acsLabel = await findImageCoordinates(page, 'img/acs_url.png');
-    if (acsLabel) {
-      const offsetX = 100; // ajustar si el input está más lejos
-      const offsetY = 10;
-
-      const inputX = acsLabel.x + offsetX;
-      const inputY = acsLabel.y + offsetY;
-
-      console.log(`📍 Coordenadas detectadas para ACS URL: x=${acsLabel.x}, y=${acsLabel.y}`);
-      console.log(`👉 Clic en input: x=${inputX}, y=${inputY}`);
-
-      // Hacer doble clic para seleccionar el campo
-      await page.mouse.click(inputX, inputY, { clickCount: 2 });
-      await new Promise(resolve => setTimeout(resolve, 200));
-
-      // Ctrl+A y Backspace para limpiar
-      await page.mouse.click(inputX, inputY);
-      await page.keyboard.sendCharacter('\u0001'); // Ctrl+A
-
-     // Borrar
-      await page.keyboard.press('Backspace');
-      await page.keyboard.press('Delete');
-
-
-      // Escribir nueva URL
-      const nuevaACS = "hola";
-      await page.keyboard.type(nuevaACS, { delay: 30 });
-      console.log("✍️ ACS URL actualizado correctamente");
-    } else {
-      console.log("❌ No se encontró la imagen del campo 'ACS URL'.");
+    // ====== INICIO TR-069 integrado ======
+    // Reemplazar el contenido del input #Frm_URL dentro del iframe mainFrame
+    async function getMainFrame(page) {
+      // A veces tarda en anexar el frame al DOM
+      for (let i = 0; i < 20; i++) {
+        const f = page.frames().find(fr => fr.name() === 'mainFrame');
+        if (f) return f;
+        await page.waitForTimeout(250);
+      }
+      throw new Error('No encontré el iframe mainFrame');
     }
 
-    await new Promise(resolve => setTimeout(resolve, 100));
-    // Actualizar campo Username
-    const usernameLabel = await findImageCoordinates(page, 'img/username.png');
-    if (usernameLabel) {
-      const offsetX = 100;
-      const offsetY = 10;
+    async function setFrmURLValue(page, newValue) {
+      const frame = await getMainFrame(page);
 
-      const inputX = usernameLabel.x + offsetX;
-      const inputY = usernameLabel.y + offsetY;
+      // Asegurar que el input existe y está visible
+      const elHandle = await frame.waitForSelector('#Frm_URL', { visible: true, timeout: 15000 });
 
-      console.log(`📍 Coordenadas detectadas para Username: x=${usernameLabel.x}, y=${usernameLabel.y}`);
-      console.log(`👉 Clic en input: x=${inputX}, y=${inputY}`);
+      // 1) Scroll + foco
+      await elHandle.evaluate(el => el.scrollIntoView({ block: 'center' }));
+      await elHandle.focus();
 
-      await page.mouse.click(inputX, inputY, { clickCount: 2 });
-      await new Promise(resolve => setTimeout(resolve, 200));
+      // 2) Intento por “tecleado humano”: triple click + Backspace
+      try {
+        await elHandle.click({ clickCount: 3 });
+        await page.keyboard.press('Backspace');
+        await frame.type('#Frm_URL', newValue, { delay: 20 });
 
-      // Ctrl+A y Backspace para limpiar
-      await page.keyboard.sendCharacter('\u0001');
-      await page.keyboard.down('Control');
-      await page.keyboard.press('x');
-      await page.keyboard.up('Control');
+        // Disparar eventos que algunos formularios requieren
+        await frame.evaluate(() => {
+          const inp = document.querySelector('#Frm_URL');
+          inp.dispatchEvent(new Event('input', { bubbles: true }));
+          inp.dispatchEvent(new Event('change', { bubbles: true }));
+        });
 
-      const username = "Claroadmin";
-      await page.keyboard.type(username, { delay: 30 });
-      console.log("✍️ Username actualizado correctamente");
-    } else {
-      console.log("❌ No se encontró la imagen del campo 'username'.");
+        // Forzar blur con Tab (algunos UIs guardan al perder foco)
+        await page.keyboard.press('Tab');
+        console.log('✅ Escribí con triple-click + Backspace + type()');
+      } catch (e) {
+        console.log('⚠️ Falló método por tecleo. Probando asignación directa...', e.message);
+
+        // 3) Intento por asignación directa + eventos
+        await frame.evaluate((val) => {
+          const inp = document.querySelector('#Frm_URL');
+          if (!inp) throw new Error('No existe #Frm_URL');
+          // limpiar
+          inp.value = '';
+          inp.dispatchEvent(new Event('input', { bubbles: true }));
+          // setear
+          inp.value = val;
+          inp.dispatchEvent(new Event('input', { bubbles: true }));
+          inp.dispatchEvent(new Event('change', { bubbles: true }));
+          inp.blur();
+        }, newValue);
+
+        console.log('✅ Asigné por DOM con eventos input/change/blur');
+      }
+
+      // 4) Verificación (log en consola)
+      const finalVal = await frame.$eval('#Frm_URL', el => el.value);
+      console.log('🔎 Valor final #Frm_URL =', finalVal);
+      if (finalVal !== newValue) {
+        throw new Error(`El campo no quedó con el valor esperado. Actual: "${finalVal}"`);
+      }
     }
 
+    // === Llamada:
+    await new Promise(resolve => setTimeout(resolve, 10000));
+    await setFrmURLValue(page, 'hola');
+      // ====== FIN TR-069 integrado ======
 
   } catch (error) {
     console.error("❌ Error:", error.message);
