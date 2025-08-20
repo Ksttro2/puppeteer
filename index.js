@@ -4,9 +4,9 @@ import { PNG } from "pngjs";
 
 // Función para encontrar coordenadas de una imagen dentro de la pantalla
 async function findImageCoordinates(page, targetImagePath) {
-  await page.screenshot({ path: "fullpage.png", fullPage: true });
+  await page.screenshot({ path: "img/fullpage.png", fullPage: true });
 
-  const fullImage = PNG.sync.read(fs.readFileSync("fullpage.png"));
+  const fullImage = PNG.sync.read(fs.readFileSync("img/fullpage.png"));
   const target = PNG.sync.read(fs.readFileSync(targetImagePath));
 
   const { width: fw, height: fh } = fullImage;
@@ -42,6 +42,11 @@ async function findImageCoordinates(page, targetImagePath) {
 }
 
 const credenciales = [
+  { usuario: "admin", password: "Gpon2016CLARO!" },
+  { usuario: "admin@claro", password: "Gpon2016CLARO!" }
+];
+
+const credencil680 = [
   { usuario: "admin", password: "Gpon2016CLARO!" },
   { usuario: "admin@claro", password: "Gpon2016CLARO!" }
 ];
@@ -138,7 +143,7 @@ async function openWebPage() {
     await new Promise(resolve => setTimeout(resolve, 2000));
 
     // 🔍 Buscar botón 'Security' por imagen
-    const coords = await findImageCoordinates(page, 'security_button.png');
+    const coords = await findImageCoordinates(page, 'img/security_button.png');
     if (coords) {
       console.log(`📍 Coordenadas detectadas: x=${coords.x}, y=${coords.y}`);
       await page.mouse.click(coords.x, coords.y);
@@ -163,7 +168,7 @@ async function openWebPage() {
     } catch (err) {
       console.log("⚠️ No se pudo acceder al checkbox directamente, intentando con imagen...");
 
-      const coords = await findImageCoordinates(page, 'envio.png');
+      const coords = await findImageCoordinates(page, 'img/envio.png');
 
       if (coords) {
         console.log("☑️ El checkbox ya está activado (envio.png encontrado), no se hace clic.");
@@ -171,7 +176,7 @@ async function openWebPage() {
       } else {
         console.log("🔁 No se encontró envio.png, buscando sinenvio.png...");
 
-        const fallbackCoords = await findImageCoordinates(page, 'sinenvio.png');
+        const fallbackCoords = await findImageCoordinates(page, 'img/sinenvio.png');
         if (fallbackCoords) {
           console.log(`📍 Coordenadas detectadas: x=${fallbackCoords.x}, y=${fallbackCoords.y}`);
           await page.mouse.click(fallbackCoords.x, fallbackCoords.y);
@@ -186,7 +191,7 @@ async function openWebPage() {
     // Solo si se hizo clic en sinenvio.png, hacer clic en enviar
     if (hizoClickEnSinEnvio) {
       await new Promise(resolve => setTimeout(resolve, 3000));
-      const enviar = await findImageCoordinates(page, 'enviar.png');
+      const enviar = await findImageCoordinates(page, 'img/enviar.png');
       if (enviar) {
         console.log(`📍 Coordenadas detectadas: x=${enviar.x}, y=${enviar.y}`);
         await page.mouse.click(enviar.x, enviar.y);
@@ -198,7 +203,7 @@ async function openWebPage() {
     }
 
 
-    const enviado = await findImageCoordinates(page, 'administracion.png');
+    const enviado = await findImageCoordinates(page, 'img/administracion.png');
     if (enviado) {
       console.log(`📍 Coordenadas detectadas: x=${enviado.x}, y=${enviado.y}`);
       await page.mouse.click(enviado.x, enviado.y);
@@ -210,7 +215,7 @@ async function openWebPage() {
     await new Promise(resolve => setTimeout(resolve, 5000));
 
     // Actualizar campo ACS URL
-    const acsLabel = await findImageCoordinates(page, 'acs_url.png');
+    const acsLabel = await findImageCoordinates(page, 'img/acs_url.png');
     if (acsLabel) {
       const offsetX = 100; // ajustar si el input está más lejos
       const offsetY = 10;
@@ -244,7 +249,7 @@ async function openWebPage() {
 
     await new Promise(resolve => setTimeout(resolve, 100));
     // Actualizar campo Username
-    const usernameLabel = await findImageCoordinates(page, 'username.png');
+    const usernameLabel = await findImageCoordinates(page, 'img/username.png');
     if (usernameLabel) {
       const offsetX = 100;
       const offsetY = 10;
