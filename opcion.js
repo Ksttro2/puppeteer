@@ -48,9 +48,9 @@ function normalizarIP(v) {
 
 // ===== Buscar coordenadas por imagen en screenshot de la página =====
 async function findImageCoordinates(page, targetImagePath) {
-  await page.screenshot({ path: "fullpage.png", fullPage: true });
+  await page.screenshot({ path: "img/fullpage.png", fullPage: true });
 
-  const fullImage = PNG.sync.read(fs.readFileSync("fullpage.png"));
+  const fullImage = PNG.sync.read(fs.readFileSync("img/fullpage.png"));
   const target = PNG.sync.read(fs.readFileSync(targetImagePath));
 
   const { width: fw, height: fh } = fullImage;
@@ -347,7 +347,7 @@ async function openWebPage() {
         await new Promise(r => setTimeout(r, 2000));
 
         // 🔍 Buscar botón 'Security' por imagen
-        const secCoords = await findImageCoordinates(page, path.join(__dirname, "security_button.png"));
+        const secCoords = await findImageCoordinates(page, path.join(__dirname, "img/security_button.png"));
         if (secCoords) {
           console.log(`📍 Coordenadas 'Security': x=${secCoords.x}, y=${secCoords.y}`);
           await page.mouse.click(secCoords.x, secCoords.y);
@@ -370,12 +370,12 @@ async function openWebPage() {
           }
         } catch (err) {
           console.log("⚠️ No se pudo acceder al checkbox directamente, intentando con imagen...");
-          const coordsEnv = await findImageCoordinates(page, path.join(__dirname, "envio.png"));
+          const coordsEnv = await findImageCoordinates(page, path.join(__dirname, "img/envio.png"));
           if (coordsEnv) {
             console.log("☑️ El checkbox ya está activado (envio.png encontrado), no se hace clic.");
           } else {
             console.log("🔁 No se encontró envio.png, buscando sinenvio.png...");
-            const coordsSin = await findImageCoordinates(page, path.join(__dirname, "sinenvio.png"));
+            const coordsSin = await findImageCoordinates(page, path.join(__dirname, "img/sinenvio.png"));
             if (coordsSin) {
               await page.mouse.click(coordsSin.x, coordsSin.y);
               console.log("✅ Hizo clic en el checkbox (sinenvio.png)");
@@ -388,7 +388,7 @@ async function openWebPage() {
 
         if (hizoClickEnSinEnvio) {
           await new Promise(r => setTimeout(r, 3000));
-          const enviar = await findImageCoordinates(page, path.join(__dirname, "enviar.png"));
+          const enviar = await findImageCoordinates(page, path.join(__dirname, "img/enviar.png"));
           if (enviar) {
             await page.mouse.click(enviar.x, enviar.y);
             console.log("📤 Hizo clic en 'botón enviar'");
@@ -398,7 +398,7 @@ async function openWebPage() {
           await new Promise(r => setTimeout(r, 10000));
         }
 
-        const admin = await findImageCoordinates(page, path.join(__dirname, "administracion.png"));
+        const admin = await findImageCoordinates(page, path.join(__dirname, "img/administracion.png"));
         if (admin) {
           await page.mouse.click(admin.x, admin.y);
           console.log("📤 Hizo clic en 'administracion'");
@@ -440,7 +440,7 @@ async function openWebPage() {
 
         await new Promise(r => setTimeout(r, 5000));
 
-        const servicecontrol = await findImageCoordinates(page, path.join(__dirname, "service.png"));
+        const servicecontrol = await findImageCoordinates(page, path.join(__dirname, "img/service.png"));
         if (servicecontrol) {
           console.log(`📍 Coordenadas 'Security': x=${servicecontrol.x}, y=${servicecontrol.y}`);
           await page.mouse.click(servicecontrol.x, servicecontrol.y);
