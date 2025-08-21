@@ -440,13 +440,13 @@ async function openWebPage() {
 
         await new Promise(r => setTimeout(r, 5000));
 
-        const servicecontrol = await findImageCoordinates(page, path.join(__dirname, "img/service.png"));
-        if (servicecontrol) {
-          console.log(`📍 Coordenadas 'Security': x=${servicecontrol.x}, y=${servicecontrol.y}`);
-          await page.mouse.click(servicecontrol.x, servicecontrol.y);
-          console.log("🛡️ Hizo clic en 'Servicios de control'");
+        const seccontrol = await findImageCoordinates(page, path.join(__dirname, "img/service.png"));
+        if (seccontrol) {
+          console.log(`📍 Coordenadas 'Service control': x=${seccontrol.x}, y=${seccontrol.y}`);
+          await page.mouse.click(seccontrol.x, seccontrol.y);
+          console.log("🛡️ Hizo clic en 'service control'");
         } else {
-          console.log("❌ No se encontró la imagen del botón 'Security'.");
+          console.log("❌ No se encontró la imagen del botón 'Service control'.");
           continue;
         }
 
