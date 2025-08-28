@@ -438,8 +438,6 @@ async function openWebPage() {
         await new Promise(r => setTimeout(r, 200));
         await clickSecurity(frame);
 
-        await new Promise(r => setTimeout(r, 5000));
-
         const seccontrol = await findImageCoordinates(page, path.join(__dirname, "img/service.png"));
         if (seccontrol) {
           console.log(`📍 Coordenadas 'Service control': x=${seccontrol.x}, y=${seccontrol.y}`);

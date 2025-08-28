@@ -1,13 +1,56 @@
+// opcion.js
 import puppeteer from "puppeteer";
 import fs from "fs";
-import clipboard from 'clipboardy';
+import clipboard from "clipboardy";
 import { PNG } from "pngjs";
+import XLSX from "xlsx";
+import path from "path";
+import { fileURLToPath } from "url";
 
-// Función para encontrar coordenadas de una imagen dentro de la pantalla
+// ===== Utiles de ruta (ESM) =====
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// ===== Leer Excel: informacion.xlsx -> columna "IP" (comas -> puntos) =====
+const excelPath = path.join(__dirname, "informacion.xlsx");
+let ips = [];
+try {
+  const wb = XLSX.readFile(excelPath);
+  const sheet = wb.Sheets[wb.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(sheet, { defval: "", raw: false });
+
+  // Detecta la columna "IP" sin depender de may/min y espacios
+  const ipKey =
+    (rows[0] && Object.keys(rows[0]).find(k => k.trim().toLowerCase() === "ip")) || "IP";
+
+  ips = rows
+    .map(r => normalizarIP(String(r[ipKey] ?? "").trim()))
+    .filter(Boolean);
+
+  console.log(`📊 IPs cargadas de Excel: ${ips.length}`);
+  if (ips.length) console.log("Ejemplo:", ips[0]);
+} catch (e) {
+  console.log("⚠️ No pude leer informacion.xlsx:", e.message);
+}
+
+// Convierte "10,177,120,153" -> "10.177.120.153" y valida IPv4
+function normalizarIP(v) {
+  if (!v) return null;
+  v = v.replace(/^\s*(https?:\/\/)/i, "").split(/[\/\s]/)[0]; // quita protocolo/paths
+  v = v.split(":")[0]; // quita puerto
+  v = v.replace(/,/g, "."); // comas -> puntos
+  const m = v.match(/^(\d{1,3}\.){3}\d{1,3}$/);
+  if (!m) return null;
+  const oct = v.split(".").map(Number);
+  if (oct.some(n => Number.isNaN(n) || n < 0 || n > 255)) return null;
+  return oct.join(".");
+}
+
+// ===== Buscar coordenadas por imagen en screenshot de la página =====
 async function findImageCoordinates(page, targetImagePath) {
-  await page.screenshot({ path: "fullpage.png", fullPage: true });
+  await page.screenshot({ path: "img/fullpage.png", fullPage: true });
 
-  const fullImage = PNG.sync.read(fs.readFileSync("fullpage.png"));
+  const fullImage = PNG.sync.read(fs.readFileSync("img/fullpage.png"));
   const target = PNG.sync.read(fs.readFileSync(targetImagePath));
 
   const { width: fw, height: fh } = fullImage;
@@ -16,48 +59,275 @@ async function findImageCoordinates(page, targetImagePath) {
   for (let y = 0; y <= fh - th; y++) {
     for (let x = 0; x <= fw - tw; x++) {
       let match = true;
-
       for (let ty = 0; ty < th; ty++) {
         for (let tx = 0; tx < tw; tx++) {
           const fullIdx = ((y + ty) * fw + (x + tx)) * 4;
           const targetIdx = (ty * tw + tx) * 4;
-
           for (let i = 0; i < 4; i++) {
             if (Math.abs(fullImage.data[fullIdx + i] - target.data[targetIdx + i]) > 20) {
-              match = false;
-              break;
+              match = false; break;
             }
           }
           if (!match) break;
         }
         if (!match) break;
       }
-
       if (match) {
         return { x: x + tw / 2, y: y + th / 2 };
       }
     }
   }
-
   return null;
 }
 
+// ===== Credenciales =====
 const credenciales = [
   { usuario: "admin", password: "Gpon2016CLARO!" },
   { usuario: "admin@claro", password: "Gpon2016CLARO!" }
 ];
 
+const credenciales80 = [
+  {"usuario": "claro@admin", "password": "Cl4r04lT3rn4t1v02019*"},
+  {"usuario": "admin@claro", "password": "Gp0n2019CL4R0!"}
+];
+
+// ===== Abre https://IP, salta SSL y prueba logins =====
+async function abrirYLoguear(page, ip, credenciales) {
+
+
+
+  console.log(`🌐 Abriendo https://${ip}`);
+  await page.goto(`https://${ip}`, { waitUntil: "domcontentloaded", timeout: 20000 });
+
+
+  // Saltar advertencia SSL si aparece
+  try {
+    await page.waitForSelector("#details-button", { timeout: 5000 });
+    await page.click("#details-button");
+    await page.waitForSelector("#proceed-link", { timeout: 5000 });
+    await page.click("#proceed-link");
+    await page.waitForNavigation({ waitUntil: "networkidle2", timeout: 20000 });
+    console.log("➡️ Saltó advertencia SSL");
+  } catch {
+    console.log("⚠️ Advertencia SSL no apareció o ya fue pasada.");
+  }
+
+  const titulo = await page.title();
+  console.log(`📄 Título de la página: ${titulo}`);
+  // Probar credenciales
+  for (const cred of credenciales) {
+    console.log(`Probando login con: ${cred.usuario}`);
+    await page.waitForSelector("#Frm_Username", { timeout: 10000 });
+    await page.waitForSelector("#Frm_Password", { timeout: 10000 });
+
+    // Limpiar + escribir
+    await page.click("#Frm_Username", { clickCount: 3 });
+    await page.keyboard.press("Backspace");
+    await page.click("#Frm_Password", { clickCount: 3 });
+    await page.keyboard.press("Backspace");
+    await page.type("#Frm_Username", cred.usuario, { delay: 50 });
+    await page.type("#Frm_Password", cred.password, { delay: 50 });
+
+    await Promise.all([
+      page.click("#LoginId"),
+      page.waitForNavigation({ waitUntil: "networkidle2", timeout: 10000 }).catch(() => {})
+    ]);
+
+    if (page.url().includes("start.ghtml")) {
+      console.log(`✅ Login exitoso con: ${cred.usuario}`);
+      return true;
+    }
+    console.log(`❌ Falló login con: ${cred.usuario}`);
+
+    // Reintentar desde la raíz para siguiente intento
+    await page.goto(`https://${ip}`, { waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {});
+  }
+
+  return false;
+}
+
+// ===== Helpers de frame / inputs / selects / checkbox / submit =====
+async function waitForMainFrame(page, timeout = 15000) {
+  const step = 250;
+  const end = Date.now() + timeout;
+  while (Date.now() < end) {
+    const byName = page.frames().find(f => f.name() === "mainFrame");
+    if (byName) return byName;
+    const handle = await page.$('iframe[name="mainFrame"], iframe#mainFrame');
+    if (handle) {
+      const fr = await handle.contentFrame();
+      if (fr) return fr;
+    }
+    await page.waitForTimeout(step);
+  }
+  throw new Error("No encontré el iframe mainFrame");
+}
+
+async function setInput(frame, selector, newValue) {
+  const el = await frame.waitForSelector(selector, { visible: true, timeout: 15000 });
+  await el.evaluate(n => n.scrollIntoView({ block: "center" }));
+  await el.focus();
+
+  try {
+    await el.click({ clickCount: 3 });
+    await el.press("Backspace");
+    await frame.type(selector, newValue, { delay: 20 });
+    await frame.evaluate((sel) => {
+      const inp = document.querySelector(sel);
+      inp.dispatchEvent(new Event("input", { bubbles: true }));
+      inp.dispatchEvent(new Event("change", { bubbles: true }));
+    }, selector);
+  } catch (e) {
+    await frame.evaluate((sel, val) => {
+      const inp = document.querySelector(sel);
+      if (!inp) throw new Error(`No existe ${sel}`);
+      inp.value = "";
+      inp.dispatchEvent(new Event("input", { bubbles: true }));
+      inp.value = val;
+      inp.dispatchEvent(new Event("input", { bubbles: true }));
+      inp.dispatchEvent(new Event("change", { bubbles: true }));
+      inp.blur();
+    }, selector, newValue);
+  }
+
+  const finalVal = await frame.$eval(selector, n => n.value);
+  console.log(`🔎 ${selector} =`, finalVal);
+  if (String(finalVal) !== String(newValue)) {
+    throw new Error(`No quedó el valor esperado en ${selector} (actual: "${finalVal}")`);
+  }
+}
+
+async function setSelect(frame, selector, { value, text } = {}) {
+  await frame.waitForSelector(selector, { visible: true, timeout: 15000 });
+
+  let selected = null;
+  if (value) {
+    const res = await frame.select(selector, value);
+    selected = res?.[0] ?? null;
+  }
+  if (!selected && text) {
+    selected = await frame.evaluate((sel, wanted) => {
+      const el = document.querySelector(sel);
+      const opt = Array.from(el.options).find(o => o.textContent.trim() === wanted);
+      if (opt) {
+        el.value = opt.value;
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+        return opt.value;
+      }
+      return null;
+    }, selector, text);
+  }
+
+  await frame.evaluate((sel) => {
+    const el = document.querySelector(sel);
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  }, selector);
+
+  const fin = await frame.$eval(selector, el => ({
+    value: el.value,
+    text: el.options[el.selectedIndex]?.textContent?.trim(),
+  }));
+  console.log(`🔎 ${selector} => value:${fin.value}, text:${fin.text}`);
+  if (!fin.value) throw new Error(`No se pudo seleccionar en ${selector}`);
+}
+
+async function ensureCheckbox(frame, selector, shouldBeChecked = true) {
+  await frame.waitForSelector(selector, { visible: true, timeout: 15000 });
+  const current = await frame.$eval(selector, el => el.checked);
+  if (current !== shouldBeChecked) {
+    await frame.click(selector);
+    await frame.evaluate((sel) => {
+      const el = document.querySelector(sel);
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+    }, selector);
+  }
+  const now = await frame.$eval(selector, el => el.checked);
+  console.log(`🔎 ${selector} checked=${now}`);
+  if (now !== shouldBeChecked) throw new Error(`No se pudo cambiar el estado de ${selector}`);
+}
+
+async function clickSubmit(frame, page) {
+  const btn = await frame.waitForSelector("#Btn_Submit", { visible: true, timeout: 15000 });
+  await btn.evaluate(el => el.scrollIntoView({ block: "center" }));
+  await btn.focus();
+  await btn.click({ delay: 50 });
+
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  await Promise.race([
+    page.waitForNavigation({ waitUntil: "networkidle2", timeout: 4000 }).catch(() => {}),
+    sleep(1000),
+  ]);
+
+  const stillThere = await frame.$("#Btn_Submit");
+  if (stillThere) {
+    await frame.evaluate(() => {
+      const b = document.querySelector("#Btn_Submit");
+      b?.click();
+      if (typeof window.pageSubmit === "function") {
+        window.pageSubmit();
+      }
+    });
+  }
+  console.log("📤 Click en Submit enviado");
+}
+
+// ===== Helpers de menú =====
+async function clickSecurity(frame) {
+  const tdSel = "#mmSec";
+  const fontSel = "#Fnt_mmSec";
+
+  const td = await frame.waitForSelector(tdSel, { visible: true, timeout: 15000 });
+  await td.evaluate(el => el.scrollIntoView({ block: "center" }));
+
+  const symbol = await frame.$eval(tdSel, el => el.querySelector(".menuPlusSymbol")?.textContent?.trim() || "");
+  if (symbol === "+") {
+    await td.click();
+    await frame.waitForFunction((sel) => {
+      const s = document.querySelector(sel)?.querySelector(".menuPlusSymbol");
+      return s && s.textContent.trim() !== "+";
+    }, {}, tdSel);
+  } else {
+    if (await frame.$(fontSel)) await frame.click(fontSel);
+    else await td.click();
+  }
+  console.log('✅ "Security" expandido/seleccionado');
+}
+
+async function getMenuFrame(page, timeout = 20000) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < timeout) {
+    for (const fr of page.frames()) {
+      try {
+        const hasMenu = await fr.evaluate(() => {
+          return !!(
+            document.querySelector('#mmSec') ||
+            document.querySelector('#smSerCon') ||
+            Array.from(document.querySelectorAll('font,td,span'))
+              .some(el => el.textContent.trim() === 'TR-069')
+          );
+        });
+        if (hasMenu) return fr;
+      } catch {}
+    }
+    await page.waitForTimeout(250);
+  }
+  throw new Error("No encontré el frame del menú");
+}
+
+
+// ===== Flujo principal =====
 async function openWebPage() {
   const browser = await puppeteer.launch({
     headless: false,
     ignoreHTTPSErrors: true,
     args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--ignore-certificate-errors',
-      '--allow-insecure-localhost',
-      '--ssl-version-min=tls1',
-      '--disable-features=BlockInsecurePrivateNetworkRequests',
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--ignore-certificate-errors",
+      "--allow-insecure-localhost",
+      "--ssl-version-min=tls1",
+      "--disable-features=BlockInsecurePrivateNetworkRequests",
     ],
   });
 
@@ -65,222 +335,126 @@ async function openWebPage() {
   await page.setViewport({ width: 1366, height: 768 });
 
   try {
-    await page.goto("https://10.177.120.153", {
-      waitUntil: "domcontentloaded",
-      timeout: 20000,
-    });
-
-    // Saltar advertencia de seguridad si aparece
-    try {
-      await page.waitForSelector("#details-button", { timeout: 5000 });
-      await page.click("#details-button");
-      await page.waitForSelector("#proceed-link", { timeout: 5000 });
-      await page.click("#proceed-link");
-      await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 20000 });
-      console.log("➡️ Saltó advertencia SSL");
-    } catch (err) {
-      console.log("⚠️ Advertencia SSL no apareció o ya fue pasada.");
-    }
-
-    let loginExitoso = false;
-
-    for (let i = 0; i < credenciales.length; i++) {
-      const cred = credenciales[i];
-      console.log(`🔐 Probando login con: ${cred.usuario}`);
-
-      await page.waitForSelector("#Frm_Username", { timeout: 5000 });
-      await page.waitForSelector("#Frm_Password", { timeout: 5000 });
-
-      // Limpiar campos
-      await page.click("#Frm_Username", { clickCount: 3 });
-      await page.keyboard.press('Backspace');
-      await page.click("#Frm_Password", { clickCount: 3 });
-      await page.keyboard.press('Backspace');
-
-      // Ingresar usuario y contraseña
-      await page.type("#Frm_Username", cred.usuario, { delay: 50 });
-      await page.type("#Frm_Password", cred.password, { delay: 50 });
-
-      // Hacer login
-      await Promise.all([
-        page.click("#LoginId"),
-        page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 10000 }).catch(() => {})
-      ]);
-
-      const url = page.url();
-      if (url.includes("start.ghtml")) {
-        console.log(`✅ Login exitoso con: ${cred.usuario}`);
-        loginExitoso = true;
-        break;
-      } else {
-        console.log(`❌ Falló login con: ${cred.usuario}`);
-
-        await page.goto("https://10.177.120.153", {
-          waitUntil: "domcontentloaded",
-          timeout: 20000,
-        });
-
-        try {
-          await page.waitForSelector("#details-button", { timeout: 3000 });
-          await page.click("#details-button");
-          await page.waitForSelector("#proceed-link", { timeout: 3000 });
-          await page.click("#proceed-link");
-          await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 10000 });
-          console.log("🔁 Advertencia SSL reapareció y fue saltada.");
-        } catch (e) {
-          // No apareció, continuar
-        }
-      }
-    }
-
-    if (!loginExitoso) {
-      console.log("❌ Ninguna credencial funcionó.");
-      return;
-    }
-
-    await new Promise(resolve => setTimeout(resolve, 2000));
-
-    // 🔍 Buscar botón 'Security' por imagen
-    const coords = await findImageCoordinates(page, 'security_button.png');
-    if (coords) {
-      console.log(`📍 Coordenadas detectadas: x=${coords.x}, y=${coords.y}`);
-      await page.mouse.click(coords.x, coords.y);
-      console.log("🛡️ Hizo clic en 'Security'");
-    } else {
-      console.log("❌ No se encontró la imagen del botón 'Security'.");
-      return;
-    }
-
-    // ✅ Validar y marcar checkbox si no está marcado
-    let hizoClickEnSinEnvio = false;
-
-    try {
-      await page.waitForSelector("#Frm_IsProtect", { timeout: 10000 });
-      const isChecked = await page.$eval("#Frm_IsProtect", el => el.checked);
-      if (!isChecked) {
-        await page.click("#Frm_IsProtect");
-        console.log("✅ Checkbox seleccionado desde DOM");
-      } else {
-        console.log("☑️ Checkbox ya estaba seleccionado");
-      }
-    } catch (err) {
-      console.log("⚠️ No se pudo acceder al checkbox directamente, intentando con imagen...");
-
-      const coords = await findImageCoordinates(page, 'envio.png');
-
-      if (coords) {
-        console.log("☑️ El checkbox ya está activado (envio.png encontrado), no se hace clic.");
-      } else {
-        console.log("🔁 No se encontró envio.png, buscando sinenvio.png...");
-
-        const fallbackCoords = await findImageCoordinates(page, 'sinenvio.png');
-        if (fallbackCoords) {
-          console.log(`📍 Coordenadas detectadas: x=${fallbackCoords.x}, y=${fallbackCoords.y}`);
-          await page.mouse.click(fallbackCoords.x, fallbackCoords.y);
-          console.log("✅ Hizo clic en el checkbox (sinenvio.png)");
-          hizoClickEnSinEnvio = true;
-        } else {
-          console.log("❌ No se encontró ninguna de las dos imágenes.");
-        }
-      }
-    }
-
-    // Solo si se hizo clic en sinenvio.png, hacer clic en enviar
-    if (hizoClickEnSinEnvio) {
-      await new Promise(resolve => setTimeout(resolve, 3000));
-      const enviar = await findImageCoordinates(page, 'enviar.png');
-      if (enviar) {
-        console.log(`📍 Coordenadas detectadas: x=${enviar.x}, y=${enviar.y}`);
-        await page.mouse.click(enviar.x, enviar.y);
-        console.log("📤 Hizo clic en 'botón enviar'");
-      } else {
-        console.log("❌ No se encontró la imagen del botón 'enviar'.");
-      }
-      await new Promise(resolve => setTimeout(resolve, 10000));
-    }
-
-    const enviado = await findImageCoordinates(page, 'administracion.png');
-    if (enviado) {
-      console.log(`📍 Coordenadas detectadas: x=${enviado.x}, y=${enviado.y}`);
-      await page.mouse.click(enviado.x, enviado.y);
-      console.log("📤 Hizo clic en 'administracion'");
-    } else {
-      console.log("❌ No se encontró la imagen del botón 'administracion'.");
-    }
-
-    // ====== INICIO TR-069 integrado ======
-    // Reemplazar el contenido del input #Frm_URL dentro del iframe mainFrame
-    async function getMainFrame(page) {
-      // A veces tarda en anexar el frame al DOM
-      for (let i = 0; i < 20; i++) {
-        const f = page.frames().find(fr => fr.name() === 'mainFrame');
-        if (f) return f;
-        await page.waitForTimeout(250);
-      }
-      throw new Error('No encontré el iframe mainFrame');
-    }
-
-    async function setFrmURLValue(page, newValue) {
-      const frame = await getMainFrame(page);
-
-      // Asegurar que el input existe y está visible
-      const elHandle = await frame.waitForSelector('#Frm_URL', { visible: true, timeout: 15000 });
-
-      // 1) Scroll + foco
-      await elHandle.evaluate(el => el.scrollIntoView({ block: 'center' }));
-      await elHandle.focus();
-
-      // 2) Intento por “tecleado humano”: triple click + Backspace
+    for (const ip of ips) {
       try {
-        await elHandle.click({ clickCount: 3 });
-        await page.keyboard.press('Backspace');
-        await frame.type('#Frm_URL', newValue, { delay: 20 });
 
-        // Disparar eventos que algunos formularios requieren
-        await frame.evaluate(() => {
-          const inp = document.querySelector('#Frm_URL');
-          inp.dispatchEvent(new Event('input', { bubbles: true }));
-          inp.dispatchEvent(new Event('change', { bubbles: true }));
+        const ok = await abrirYLoguear(page, ip, credenciales);
+        if (!ok) {
+          console.log(`⛔ No se pudo iniciar sesión en ${ip}. Continúo con la siguiente.`);
+          continue;
+        }
+
+        await new Promise(r => setTimeout(r, 2000));
+
+        // 🔍 Buscar botón 'Security' por imagen
+        const secCoords = await findImageCoordinates(page, path.join(__dirname, "img/security_button.png"));
+        if (secCoords) {
+          console.log(`📍 Coordenadas 'Security': x=${secCoords.x}, y=${secCoords.y}`);
+          await page.mouse.click(secCoords.x, secCoords.y);
+          console.log("🛡️ Hizo clic en 'Security'");
+        } else {
+          console.log("❌ No se encontró la imagen del botón 'Security'.");
+          continue;
+        }
+
+        // ✅ Checkbox Frm_IsProtect (si existe en este paso de tu UI)
+        let hizoClickEnSinEnvio = false;
+        try {
+          await page.waitForSelector("#Frm_IsProtect", { timeout: 10000 });
+          const isChecked = await page.$eval("#Frm_IsProtect", el => el.checked);
+          if (!isChecked) {
+            await page.click("#Frm_IsProtect");
+            console.log("✅ Checkbox seleccionado desde DOM");
+          } else {
+            console.log("☑️ Checkbox ya estaba seleccionado");
+          }
+        } catch (err) {
+          console.log("⚠️ No se pudo acceder al checkbox directamente, intentando con imagen...");
+          const coordsEnv = await findImageCoordinates(page, path.join(__dirname, "img/envio.png"));
+          if (coordsEnv) {
+            console.log("☑️ El checkbox ya está activado (envio.png encontrado), no se hace clic.");
+          } else {
+            console.log("🔁 No se encontró envio.png, buscando sinenvio.png...");
+            const coordsSin = await findImageCoordinates(page, path.join(__dirname, "img/sinenvio.png"));
+            if (coordsSin) {
+              await page.mouse.click(coordsSin.x, coordsSin.y);
+              console.log("✅ Hizo clic en el checkbox (sinenvio.png)");
+              hizoClickEnSinEnvio = true;
+            } else {
+              console.log("❌ No se encontró ninguna de las dos imágenes.");
+            }
+          }
+        }
+
+        if (hizoClickEnSinEnvio) {
+          await new Promise(r => setTimeout(r, 3000));
+          const enviar = await findImageCoordinates(page, path.join(__dirname, "img/enviar.png"));
+          if (enviar) {
+            await page.mouse.click(enviar.x, enviar.y);
+            console.log("📤 Hizo clic en 'botón enviar'");
+          } else {
+            console.log("❌ No se encontró la imagen del botón 'enviar'.");
+          }
+          await new Promise(r => setTimeout(r, 10000));
+        }
+
+        const admin = await findImageCoordinates(page, path.join(__dirname, "img/administracion.png"));
+        if (admin) {
+          await page.mouse.click(admin.x, admin.y);
+          console.log("📤 Hizo clic en 'administracion'");
+        } else {
+          console.log("❌ No se encontró la imagen del botón 'administracion'.");
+        }
+
+        // ====== INICIO TR-069 integrado ======
+        await new Promise(r => setTimeout(r, 10000));
+        const frame = await waitForMainFrame(page);
+
+        // SELECT: escoger INTERNET_TR069 (value IGD.WD1.WCD1.WCIP1)
+        await setSelect(frame, "#Frm_DefaultWan", { value: "IGD.WD1.WCD1.WCIP1", text: "INTERNET_TR069" });
+
+        // INPUTS
+        await setInput(frame, "#Frm_URL", "http://100.70.133.132:8080/ftacs-basic/ACS");
+        await setInput(frame, "#Frm_UserName", "Claroadmin");
+        await setInput(frame, "#Frm_UserPassword", "Cl4r0@dm1n");
+        await setInput(frame, "#Frm_ConnectionRequestUsername", "admin");
+        await setInput(frame, "#Frm_ConnectionRequestPassword", "cla-acs-cl3-4cs");
+ 
+        // CHECKBOX: marcar si no está seleccionado
+        await ensureCheckbox(frame, "#Frm_PeriodicInformEnable", true);
+
+        // INTERVALO
+        await setInput(frame, "#Frm_PeriodicInformInterval", "86400");
+
+        await clickSubmit(frame, page);
+        await new Promise(r => setTimeout(r, 100));
+
+        await new Promise(r => setTimeout(r, 100));
+        page.on("dialog", async dialog => {
+          console.log("📢 Diálogo detectado:", dialog.message());
+          await dialog.accept(); // Clic en "OK"
         });
 
-        // Forzar blur con Tab (algunos UIs guardan al perder foco)
-        await page.keyboard.press('Tab');
-        console.log('✅ Escribí con triple-click + Backspace + type()');
-      } catch (e) {
-        console.log('⚠️ Falló método por tecleo. Probando asignación directa...', e.message);
+        await new Promise(r => setTimeout(r, 200));
+        await clickSecurity(frame);
 
-        // 3) Intento por asignación directa + eventos
-        await frame.evaluate((val) => {
-          const inp = document.querySelector('#Frm_URL');
-          if (!inp) throw new Error('No existe #Frm_URL');
-          // limpiar
-          inp.value = '';
-          inp.dispatchEvent(new Event('input', { bubbles: true }));
-          // setear
-          inp.value = val;
-          inp.dispatchEvent(new Event('input', { bubbles: true }));
-          inp.dispatchEvent(new Event('change', { bubbles: true }));
-          inp.blur();
-        }, newValue);
+        const seccontrol = await findImageCoordinates(page, path.join(__dirname, "img/service.png"));
+        if (seccontrol) {
+          console.log(`📍 Coordenadas 'Service control': x=${seccontrol.x}, y=${seccontrol.y}`);
+          await page.mouse.click(seccontrol.x, seccontrol.y);
+          console.log("🛡️ Hizo clic en 'service control'");
+        } else {
+          console.log("❌ No se encontró la imagen del botón 'Service control'.");
+          continue;
+        }
 
-        console.log('✅ Asigné por DOM con eventos input/change/blur');
-      }
 
-      // 4) Verificación (log en consola)
-      const finalVal = await frame.$eval('#Frm_URL', el => el.value);
-      console.log('🔎 Valor final #Frm_URL =', finalVal);
-      if (finalVal !== newValue) {
-        throw new Error(`El campo no quedó con el valor esperado. Actual: "${finalVal}"`);
+      } catch (err) {
+        console.log(`💥 Error procesando ${ip}:`, err.message);
       }
     }
-
-    // === Llamada:
-    await new Promise(resolve => setTimeout(resolve, 10000));
-    await setFrmURLValue(page, 'hola');
-      // ====== FIN TR-069 integrado ======
-
   } catch (error) {
-    console.error("❌ Error:", error.message);
+    console.error("❌ Error general:", error.message);
   } finally {
     // await browser.close();
   }
