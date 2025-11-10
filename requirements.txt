@@ -1,0 +1,7 @@
+puppeteer
+fs
+clipboardy
+pngjs
+xlsx
+path
+url
