@@ -97,8 +97,7 @@ async function abrirYLoguear(page, ip, credenciales) {
 
 
   console.log(`🌐 Abriendo https://${ip}`);
-  await page.goto(`https://${ip}`, { waitUntil: "domcontentloaded", timeout: 20000 });
-
+  await page.goto(`http://${ip}`, { waitUntil: "domcontentloaded", timeout: 20000 });
 
   // Saltar advertencia SSL si aparece
   try {
@@ -320,16 +319,19 @@ async function getMenuFrame(page, timeout = 20000) {
 async function openWebPage() {
   const browser = await puppeteer.launch({
     headless: false,
+    executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', // ✅ usa tu Chrome real
     ignoreHTTPSErrors: true,
     args: [
       "--start-maximized",
+      "--no-sandbox",
       "--disable-setuid-sandbox",
       "--ignore-certificate-errors",
       "--allow-insecure-localhost",
-      "--ssl-version-min=tls1",
-      "--disable-features=BlockInsecurePrivateNetworkRequests",
+      "--disable-web-security",
+      "--disable-features=IsolateOrigins,site-per-process", // ✅ evita aislamiento de red
+      "--disable-features=BlockInsecurePrivateNetworkRequests", // ✅ permite HTTP -> IP local
     ],
-     defaultViewport: null,
+    defaultViewport: null,
   });
 
   const page = await browser.newPage();
@@ -454,6 +456,7 @@ async function openWebPage() {
           console.log("❌ No se encontró la imagen del botón 'service_control'.");
         }
   /// inTEGRO DE LAS TABLAS
+        const sleep = ms => new Promise(r => setTimeout(r, ms));
         await new Promise(r => setTimeout(r, 5000));
         const botones = await frame.$$eval('input[id^="Btn_Modify"]', els =>
           els.map(e => ({
@@ -513,12 +516,12 @@ async function openWebPage() {
               ]);
 
               console.log('💾 Guardado enviado para este formulario');
-              await frame.waitForTimeout(1200);
+              await sleep(3000);
             } else {
               console.log('⚠️ No se encontró el botón #modify dentro del formulario');
             }
 
-            await frame.waitForTimeout(1000);
+           await new Promise(r => setTimeout(r, 1000));
           }
 
           console.log('✅ Terminó de procesar todos los formularios Modify encontrados.');
