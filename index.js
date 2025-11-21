@@ -8,8 +8,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 // ===== Utiles de ruta (ESM) =====
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const __dirname = process.cwd();
 
 // ===== Leer Excel: informacion.xlsx -> columna "IP" (comas -> puntos) =====
 const excelPath = path.join(__dirname, "informacion.xlsx");
@@ -82,8 +81,8 @@ async function findImageCoordinates(page, targetImagePath) {
 
 // ===== Credenciales =====
 const credenciales = [
-  { usuario: "admin", password: "Gpon2016CLARO!" },
-  { usuario: "admin@claro", password: "Gpon2016CLARO!" }
+  { usuario: "admin@claro", password: "Gpon2016CLARO!" },
+  { usuario: "admin", password: "Gpon2016CLARO!" }
 ];
 
 const credenciales80 = [
@@ -97,8 +96,7 @@ async function abrirYLoguear(page, ip, credenciales) {
 
 
   console.log(`🌐 Abriendo https://${ip}`);
-  await page.goto(`https://${ip}`, { waitUntil: "domcontentloaded", timeout: 20000 });
-
+  await page.goto(`http://${ip}`, { waitUntil: "domcontentloaded", timeout: 20000 });
 
   // Saltar advertencia SSL si aparece
   try {
@@ -320,15 +318,19 @@ async function getMenuFrame(page, timeout = 20000) {
 async function openWebPage() {
   const browser = await puppeteer.launch({
     headless: false,
+    executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', // ✅ usa tu Chrome real
     ignoreHTTPSErrors: true,
     args: [
+      "--start-maximized",
       "--no-sandbox",
       "--disable-setuid-sandbox",
       "--ignore-certificate-errors",
       "--allow-insecure-localhost",
-      "--ssl-version-min=tls1",
-      "--disable-features=BlockInsecurePrivateNetworkRequests",
+      "--disable-web-security",
+      "--disable-features=IsolateOrigins,site-per-process", // ✅ evita aislamiento de red
+      "--disable-features=BlockInsecurePrivateNetworkRequests", // ✅ permite HTTP -> IP local
     ],
+    defaultViewport: null,
   });
 
   const page = await browser.newPage();
@@ -427,25 +429,101 @@ async function openWebPage() {
         await setInput(frame, "#Frm_PeriodicInformInterval", "86400");
 
         await clickSubmit(frame, page);
-        await new Promise(r => setTimeout(r, 100));
 
-        await new Promise(r => setTimeout(r, 100));
-        page.on("dialog", async dialog => {
-          console.log("📢 Diálogo detectado:", dialog.message());
-          await dialog.accept(); // Clic en "OK"
-        });
 
-        await new Promise(r => setTimeout(r, 200));
-        await clickSecurity(frame);
+        await new Promise(r => setTimeout(r, 10000));
 
-        const seccontrol = await findImageCoordinates(page, path.join(__dirname, "img/service.png"));
-        if (seccontrol) {
-          console.log(`📍 Coordenadas 'Service control': x=${seccontrol.x}, y=${seccontrol.y}`);
-          await page.mouse.click(seccontrol.x, seccontrol.y);
-          console.log("🛡️ Hizo clic en 'service control'");
+        // 🔍 Buscar botón 'Security' por imagen
+        const seguriti = await findImageCoordinates(page, path.join(__dirname, "img/security_button.png"));
+        if (seguriti) {
+          console.log(`📍 Coordenadas 'Security': x=${seguriti.x}, y=${seguriti.y}`);
+          await page.mouse.click(seguriti.x, seguriti.y);
+          console.log("🛡️ Hizo clic en 'Security'");
         } else {
-          console.log("❌ No se encontró la imagen del botón 'Service control'.");
+          console.log("❌ No se encontró la imagen del botón 'Security'.");
           continue;
+        }
+
+        // Ingreso a servicio de control:
+        console.log("Validando imagen");
+        await new Promise(r => setTimeout(r, 10000));
+        const enviar = await findImageCoordinates(page, path.join(__dirname, "img/service.png"));
+        if (enviar) {
+          await page.mouse.click(enviar.x, enviar.y);
+          console.log("📤 Hizo clic en 'botón enviar'");
+        } else {
+          console.log("❌ No se encontró la imagen del botón 'service_control'.");
+        }
+  /// inTEGRO DE LAS TABLAS
+        const sleep = ms => new Promise(r => setTimeout(r, ms));
+        await new Promise(r => setTimeout(r, 5000));
+        const botones = await frame.$$eval('input[id^="Btn_Modify"]', els =>
+          els.map(e => ({
+            id: e.id,
+            onclick: e.getAttribute("onclick")
+          }))
+        );
+
+        console.log(`🔍 Se encontraron ${botones.length} botones Modify():`, botones);
+
+        if (botones.length === 0) {
+          console.log("⚠️ No se encontró ningún botón Modify().");
+        } else {
+          for (let i = 0; i < botones.length; i++) {
+            const { id } = botones[i];
+            console.log(`➡️ Abriendo formulario ${id} (${i + 1}/${botones.length})`);
+
+            // 1) Abrir el formulario de la fila i
+            await frame.click(`#${id}`);
+            // Espera a que cargue el formulario
+            await frame.waitForSelector('#Frm_INCViewName', { visible: true, timeout: 15000 });
+
+            // 2) Seleccionar WAN
+            await frame.select('#Frm_INCViewName', 'IGD.WANIF');
+            console.log('✅ Seleccionó "WAN" en Frm_INCViewName');
+
+            // 3) Llenar IPs
+            await frame.$eval('#Frm_MinSrcIp', (el, val) => { el.value = val; el.dispatchEvent(new Event('input', {bubbles:true})); el.dispatchEvent(new Event('change', {bubbles:true})); }, '172.31.0.1');
+            await frame.$eval('#Frm_MaxSrcIp', (el, val) => { el.value = val; el.dispatchEvent(new Event('input', {bubbles:true})); el.dispatchEvent(new Event('change', {bubbles:true})); }, '172.31.255.254');
+            console.log('✅ Se llenaron los campos de IPs');
+
+            // 4) Activar checkbox HTTP si no está marcado
+            await frame.waitForSelector('#ServiceType0', { visible: true, timeout: 10000 });
+            const httpChecked = await frame.$eval('#ServiceType0', el => el.checked);
+            if (!httpChecked) {
+              await frame.click('#ServiceType0');
+              console.log('✅ Checkbox HTTP activado');
+            } else {
+              console.log('☑️ Checkbox HTTP ya estaba activado');
+            }
+
+            // 5) Guardar con el botón Modify del formulario
+            const modifyBtn = await frame.$('#modify');
+            if (modifyBtn) {
+              // Hacer clic y esperar una señal razonable de guardado (texto o refresh ligero)
+              await Promise.race([
+                (async () => {
+                  await modifyBtn.click();
+                  // espera a que el botón se deshabilite o desaparezca o aparezca texto de éxito
+                  await frame.waitForFunction(() => {
+                    const b = document.querySelector('#modify');
+                    const okMsg = /success|saved|actualizado|exitos/i.test(document.body.innerText || "");
+                    return !b || b.disabled || okMsg;
+                  }, { timeout: 8000 }).catch(() => {});
+                })(),
+                page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 8000 }).catch(() => {})
+              ]);
+
+              console.log('💾 Guardado enviado para este formulario');
+              await sleep(3000);
+            } else {
+              console.log('⚠️ No se encontró el botón #modify dentro del formulario');
+            }
+
+           await new Promise(r => setTimeout(r, 1000));
+          }
+
+          console.log('✅ Terminó de procesar todos los formularios Modify encontrados.');
         }
 
 
